@@ -1,22 +1,18 @@
-# syntax=docker/dockerfile:1
-FROM node:22-bookworm AS dependencies
+FROM python:3.13-bookworm AS base
 WORKDIR /app
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
 
-FROM node:22-bookworm AS browser
-WORKDIR /app
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-COPY --from=dependencies /app/package*.json ./
-COPY --from=dependencies /app/node_modules ./node_modules
-RUN npx playwright install --with-deps chromium \
-    && rm -rf /var/lib/apt/lists/* /root/.npm \
-    && chmod -R a+rX /ms-playwright
+FROM base AS python-deps
+COPY requirements.txt ./
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-FROM browser AS production
-ENV NODE_ENV=production
-COPY --chown=node:node src/ ./src/
-RUN mkdir -p /app/out && chown node:node /app/out
-USER node
-CMD ["node", "src/index.mjs"]
+FROM base AS browser
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM browser AS runtime
+COPY --from=python-deps /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH" PYTHONUNBUFFERED=1
+COPY src/ ./src/
+CMD ["python", "src/scrape.py"]

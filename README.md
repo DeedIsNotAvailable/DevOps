@@ -1,25 +1,39 @@
-# Quotes scrapper — лабораторная работа 1
+# Quotes scrapper — Python и Chromium
 
-Node.js + Playwright открывает <https://quotes.toscrape.com/scroll> в headless Chromium,
-прокручивает страницу до конца и собирает все цитаты из DOM после выполнения JavaScript.
-Конец пагинации определяется по `has_next` в ответах запросов самой страницы.
-Сбой HTTP или тайм-аут завершают процесс с ненулевым кодом, вместо сохранения неполных данных.
+Playwright открывает https://quotes.toscrape.com/scroll в Chromium, ждёт загрузки
+цитат через JavaScript и прокручивает страницу до конца. Python-скрипт собирает
+текст, автора и теги из DOM, затем сохраняет UTF-8 JSON в `out/result.json`.
+Ошибки загрузки прерывают выполнение, а успешный запуск заменяет старый результат.
 
-Результат — UTF-8 массив в `out/result.json`:
+## Как устроен Dockerfile
 
-```json
-[{ "text": "Цитата", "author": "Автор", "tags": ["тема"] }]
+```text
+                  base: python:3.13-bookworm
+                       /              \
+      python-deps: pip install      browser: apt install chromium
+                       \              /
+                        runtime + src/
 ```
 
-## Окружение
+Общая основа — Debian Bookworm с Python 3.13. Две независимые стадии
+собираются параллельно BuildKit: одна ставит Python-пакеты в `/opt/venv`, другая —
+Chromium и его Linux-библиотеки через apt. Финальная стадия наследует браузерную
+среду, копирует виртуальное окружение и добавляет скрипт.
+Правка `src/` не сбрасывает кеш установки apt и pip.
 
-Для контейнерного запуска нужны Docker Engine с BuildKit, GNU Make и POSIX shell.
-На Ubuntu установите Docker Engine по [официальной инструкции](https://docs.docker.com/engine/install/ubuntu/),
-а Make командой `sudo apt-get update && sudo apt-get install -y make`.
+Playwright закреплён в `requirements.txt`. Chromium берётся из Debian,
+поэтому скрипт явно выбирает `/usr/bin/chromium`. Его версию определяет репозиторий
+Debian; совместимость с Playwright нужно проверять при обновлении браузера.
 
-На Windows установите WSL2 с Ubuntu (`wsl --install -d Ubuntu`) и Docker Desktop,
-включите **Settings → Resources → WSL Integration → Ubuntu**.
-Откройте Ubuntu, установите `make` и перейдите в репозиторий:
+## Локальное окружение и production-сборка
+
+Нужны Docker с Linux Engine/BuildKit, GNU Make и POSIX shell.
+На Windows используйте WSL2 с Ubuntu и Docker Desktop:
+включите **Settings → Resources → WSL Integration → Ubuntu**,
+а в Ubuntu установите Make и Git: `sudo apt-get update && sudo apt-get install -y make git`.
+Python и Chromium на хосте для контейнерного запуска не требуются.
+
+Из Ubuntu в папке репозитория:
 
 ```sh
 cd /mnt/d/prj/sem7/DevOps
@@ -28,61 +42,32 @@ make run
 make verify
 ```
 
-Все команды проекта выполняются через Makefile. Ручные команды Docker не нужны.
+`make build` собирает конечный образ `quotes-scrapper:lab1`.
+`make run` подключает `out/` хоста к `/app/out` контейнера и запускает скрапер.
+`make verify` проверяет непустой JSON, обязательные поля, теги и отсутствие дублей.
 
-## Разработка
+На этой машине команды можно вызывать отдельно из PowerShell:
 
-Для запуска без контейнера дополнительно установите Node.js 22 (вместе с npm).
-Из корня проекта выполните:
-
-```sh
-make dev-setup
-make dev
+```powershell
+wsl -d Ubuntu -u root --cd /mnt/d/prj/sem7/DevOps -- make build
+wsl -d Ubuntu -u root --cd /mnt/d/prj/sem7/DevOps -- make run
+wsl -d Ubuntu -u root --cd /mnt/d/prj/sem7/DevOps -- make verify
 ```
 
-`dev-setup` ставит зависимости строго из lock-файла, Chromium и его системные библиотеки
-(для установки системных библиотек в Linux может потребоваться sudo).
-`make dev` запускает скрапер локально. При контейнерной работе Node.js на хосте не нужен.
-`make test` запускает тесты внутри уже собранного образа: локальная JS-страница,
-три порции цитат с задержкой и отказы HTTP страницы/API.
+Результат находится в `D:\prj\sem7\DevOps\out\result.json`.
+Удалять старый JSON перед запуском не нужно. После завершения контейнер удаляется,
+но образ и результат остаются. Для обычного пользователя Ubuntu уберите `-u root`.
+После изменения скрипта выполните `make build`, чтобы обновить его копию в образе.
 
-## Продакшн-образ
+## Разработка и CI
 
-```sh
-make build
-make run
-make verify
-make clean
-```
+Редактируйте `src/scrape.py`, затем выполняйте `make build`, `make run`, `make verify`.
+Все Docker-команды проекта находятся в Makefile.
 
-Образ `quotes-scrapper:lab1` самостоятельно собирается от `node:22-bookworm`:
+GitHub Actions вызывает `make ci`: сборка → реальный сбор цитат → проверка JSON →
+очистка. Логи доступны в GitHub Actions. Проверка обращается к внешнему сайту,
+поэтому его недоступность также приводит к ошибке CI.
 
-1. `dependencies`: `npm ci --omit=dev` по `package.json` и `package-lock.json`.
-2. `browser`: зависимости приложения из первой стадии, Chromium и Linux-библиотеки.
-3. `production`: исходники, выходная папка, пользователь `node` и команда запуска.
-
-Финальная стадия наследует подготовленную среду `browser`; в неё не копируются
-тесты, Git, документы, локальный `node_modules`, результаты или npm-кеш первой стадии.
-Версия Playwright закреплена, браузер устанавливается именно этой версией.
-Тег базового Node-образа соответствует требованию задания, но сам тег обновляемый.
-
-`make run` использует bind mount `out/ → /app/out`; файл остаётся на хосте после
-автоматического удаления контейнера. В Linux контейнер запускается с UID/GID текущего
-пользователя, чтобы результат и его удаление не требовали root.
-
-`make clean` удаляет тег образа проекта и `out/`. Кеш BuildKit сохраняется, поэтому
-следующая сборка использует готовые слои установки npm и Chromium.
-Изменение `src/` затрагивает только финальную стадию.
-Очистка кеша Docker, обновление базового образа или изменение зависимостей может
-потребовать повторной установки; это ожидаемое поведение.
-
-## CI и проверка кеша
-
-GitHub Actions вызывает **`make ci`**: сборка, тесты, реальный сбор цитат, проверка JSON,
-проверка двух сценариев кеширования, очистка и проверка чистоты Git.
-`make cache-check` проверяет `CACHED` у установки npm и Chromium после `clean`,
-а затем после изменения строки в временной копии исходников. Рабочие исходники не меняются.
-Логи сохраняются в `.checks/` и в артефакте GitHub Actions `build-logs`.
-
-`out/`, `.checks/`, `.tools/` и `node_modules/` исключены из Git.
-PR из `feat/quotes-scrapper` в `main` следует оставить открытым до защиты.
+`make clean` удаляет образ проекта и `out/`, сохраняя кеш сборщика.
+После `make ci` результат удалён намеренно; для получения JSON повторите build и run.
+`out/`, временные инструменты, Python-кеш и логи исключены из Git.
