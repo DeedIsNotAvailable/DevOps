@@ -3,3 +3,5 @@ out/
 .tools/
 .checks/
 *.log
+__pycache__/
+*.pyc

@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feat/quotes-scrapper]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quotes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, scrape, verify JSON and clean
+        run: make ci
