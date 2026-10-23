@@ -1,0 +1,65 @@
+x-aws-environment: &aws-environment
+  AWS_ENDPOINT_URL: http://floci:4566
+  AWS_DEFAULT_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  AWS_EC2_METADATA_DISABLED: "true"
+  HOME: /tmp
+
+services:
+  floci:
+    image: floci/floci:2.2.0
+    environment:
+      FLOCI_HOSTNAME: floci
+      FLOCI_STORAGE_MODE: persistent
+      FLOCI_STORAGE_PERSISTENT_PATH: /app/data
+    ports:
+      - "127.0.0.1:${FLOCI_PORT:-4566}:4566"
+    volumes:
+      - floci-data:/app/data
+
+  terraform:
+    image: hashicorp/terraform:1.13.5
+    profiles: [tools]
+    working_dir: /infra
+    environment:
+      <<: *aws-environment
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      TF_VAR_endpoint_url: http://floci:4566
+    volumes:
+      - ${INFRA_DIR:-./infra}:/infra
+
+  tools:
+    image: quotes-tools:lab2
+    profiles: [tools]
+    build:
+      context: .
+      target: tools
+    environment: *aws-environment
+    env_file: .runtime/app.env
+    volumes:
+      - ./.runtime:/runtime
+      - ./out:/app/out
+      - ./tests:/app/tests:ro
+
+  worker:
+    image: quotes-scrapper:lab2
+    build:
+      context: .
+      target: runtime
+    environment: *aws-environment
+    env_file: .runtime/app.env
+    init: true
+    shm_size: 1gb
+    stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; assert Path('/tmp/worker-ready').exists()"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    depends_on:
+      - floci
+
+volumes:
+  floci-data:

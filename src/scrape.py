@@ -4,7 +4,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 
-def scrape():
+def scrape_quotes():
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
             executable_path="/usr/bin/chromium", headless=True
@@ -48,6 +48,11 @@ def scrape():
         finally:
             browser.close()
 
+    return quotes
+
+
+def scrape():
+    quotes = scrape_quotes()
     output = Path("out/result.json")
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(".tmp")

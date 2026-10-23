@@ -5,3 +5,12 @@ out/
 *.log
 __pycache__/
 *.pyc
+.runtime/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.env
+.env.*
+!.env.example
+crash.log
